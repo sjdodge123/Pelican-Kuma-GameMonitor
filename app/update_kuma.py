@@ -16,17 +16,20 @@ KUMA_PASS = os.environ.get("KUMA_PASS", "")
 KUMA_SSL_VERIFY = os.environ.get("KUMA_SSL_VERIFY", "1") == "1"
 
 PEL_URL = os.environ.get("PEL_URL", "").rstrip("/")
-PEL_APP_KEY = os.environ.get("PEL_APP_KEY", "")         # Application API key (papp_*)
-PEL_CLIENT_KEY = os.environ.get("PEL_CLIENT_KEY", "")   # Client API key (ptlc_* / user token)
+PEL_APP_KEY = os.environ.get("PEL_APP_KEY", "")
+PEL_CLIENT_KEY = os.environ.get("PEL_CLIENT_KEY", "")
 PEL_SSL_VERIFY = os.environ.get("PEL_SSL_VERIFY", "1") == "1"
 
 KUMA_NAME_PREFIX = os.environ.get("KUMA_NAME_PREFIX", "AUTO").strip()
 KUMA_INTERVAL = int(os.environ.get("KUMA_INTERVAL", "60"))
 KUMA_STALE_DAYS = int(os.environ.get("KUMA_STALE_DAYS", "7"))
 
-# Cache so we don't hammer Pelican every minute
 CACHE_PATH = Path(os.environ.get("CACHE_PATH", "/data/pelican_servers_cache.json"))
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
+
+DEBUG = os.environ.get("DEBUG", "0") == "1"
+
+RUNNING_STATES = {"running", "starting"}
 
 # --------------------
 # Helpers
@@ -34,6 +37,10 @@ CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
 def require_env(name: str, val: str) -> None:
     if not val:
         raise SystemExit(f"Missing required environment variable: {name}")
+
+def log(msg: str) -> None:
+    if DEBUG:
+        print(msg, flush=True)
 
 def pel_app_headers() -> Dict[str, str]:
     return {
@@ -51,7 +58,6 @@ def load_cache() -> Optional[dict]:
     try:
         if CACHE_PATH.exists():
             data = json.loads(CACHE_PATH.read_text())
-            # basic TTL
             ts = data.get("_cached_at", 0)
             if time.time() - ts <= CACHE_TTL_SECONDS:
                 return data
@@ -68,15 +74,8 @@ def save_cache(payload: dict) -> None:
         pass
 
 def fetch_pelican_servers() -> List[dict]:
-    """
-    Uses Pelican/Pterodactyl Application API:
-      GET /api/application/servers?page=..&per_page=100
-    Returns a list of server attribute dicts including:
-      uuid, identifier, name
-    """
     servers: List[dict] = []
     page = 1
-
     while True:
         r = requests.get(
             f"{PEL_URL}/api/application/servers?page={page}&per_page=100",
@@ -89,7 +88,7 @@ def fetch_pelican_servers() -> List[dict]:
 
         for item in data.get("data", []):
             attr = item.get("attributes", {})
-            if attr.get("uuid") and attr.get("identifier") and attr.get("name"):
+            if attr.get("identifier") and attr.get("name"):
                 servers.append(attr)
 
         meta = data.get("meta", {})
@@ -98,16 +97,9 @@ def fetch_pelican_servers() -> List[dict]:
         if page >= total_pages:
             break
         page += 1
-
     return servers
 
 def fetch_server_resources(identifier: str) -> dict:
-    """
-    Uses Pelican/Pterodactyl Client API:
-      GET /api/client/servers/{identifier}/resources
-
-    Requires a client token that can access the server(s).
-    """
     r = requests.get(
         f"{PEL_URL}/api/client/servers/{identifier}/resources",
         headers=pel_client_headers(),
@@ -117,22 +109,36 @@ def fetch_server_resources(identifier: str) -> dict:
     r.raise_for_status()
     return r.json()
 
-def normalize_state(resources_json: dict) -> str:
+def extract_state(resources_json: dict) -> str:
     """
-    Commonly: resources['attributes']['current_state'] is one of:
-      running, starting, stopping, offline
+    Pelican/Pterodactyl responses can differ. Try multiple shapes.
     """
-    return (
-        resources_json.get("attributes", {})
-        .get("current_state", "")
-        .strip()
-        .lower()
-    )
+    candidates = []
+
+    # Common shapes
+    candidates.append(resources_json.get("attributes", {}).get("current_state"))
+    candidates.append(resources_json.get("attributes", {}).get("state"))
+
+    # Sometimes nested
+    data = resources_json.get("data", {})
+    if isinstance(data, dict):
+        candidates.append(data.get("attributes", {}).get("current_state"))
+        candidates.append(data.get("attributes", {}).get("state"))
+        candidates.append(data.get("current_state"))
+        candidates.append(data.get("state"))
+
+    # Some implementations return directly
+    candidates.append(resources_json.get("current_state"))
+    candidates.append(resources_json.get("state"))
+
+    for c in candidates:
+        if isinstance(c, str) and c.strip():
+            return c.strip().lower()
+
+    return "unknown"
 
 def monitor_name(server_name: str) -> str:
-    if KUMA_NAME_PREFIX:
-        return f"{KUMA_NAME_PREFIX} {server_name}"
-    return server_name
+    return f"{KUMA_NAME_PREFIX} {server_name}".strip() if KUMA_NAME_PREFIX else server_name
 
 def get_last_hb_ms(mon: dict) -> Optional[int]:
     for k in ("lastHeartbeat", "last_heartbeat", "lastBeat", "last_beat"):
@@ -162,7 +168,6 @@ def main() -> None:
     require_env("PEL_APP_KEY", PEL_APP_KEY)
     require_env("PEL_CLIENT_KEY", PEL_CLIENT_KEY)
 
-    # Pull Pelican server list (with TTL cache)
     cached = load_cache()
     if cached and isinstance(cached.get("servers"), list):
         servers = cached["servers"]
@@ -170,18 +175,12 @@ def main() -> None:
         servers = fetch_pelican_servers()
         save_cache({"servers": servers})
 
-    # Build desired names & quick index by name
-    desired: Dict[str, dict] = {}
-    for s in servers:
-        name = monitor_name(s["name"])
-        desired[name] = s
-
     cutoff_ms = int((time.time() - KUMA_STALE_DAYS * 86400) * 1000)
 
     with UptimeKumaApi(KUMA_URL, ssl_verify=KUMA_SSL_VERIFY) as api:
         api.login(KUMA_USER, KUMA_PASS)
 
-        # Get existing AUTO push monitors (identified by name prefix + pushToken)
+        # Existing AUTO push monitors
         monitors = api.get_monitors()
         auto: Dict[str, dict] = {}
         for mon in monitors:
@@ -191,16 +190,28 @@ def main() -> None:
             if mon.get("pushToken"):
                 auto[n] = mon
 
-        # Ensure monitor exists for every Pelican server
-        for name in desired.keys():
-            if name not in auto:
-                api.add_monitor(
-                    type=MonitorType.PUSH,
-                    name=name,
-                    interval=KUMA_INTERVAL,
-                )
+        # Only consider servers that are running/starting RIGHT NOW
+        running_servers: List[Tuple[str, str]] = []  # (monitor_name, identifier)
+        for s in servers:
+            name = monitor_name(s["name"])
+            identifier = s["identifier"]
+            try:
+                resources = fetch_server_resources(identifier)
+                state = extract_state(resources)
+                log(f"[pelican] {s['name']} ({identifier}) state={state}")
+            except Exception as e:
+                log(f"[pelican] {s.get('name')} ({identifier}) resources ERROR {type(e).__name__}: {e}")
+                continue
 
-        # Refresh list after adds
+            if state in RUNNING_STATES:
+                running_servers.append((name, identifier))
+
+                # Create monitor only when server is running/starting
+                if name not in auto:
+                    api.add_monitor(type=MonitorType.PUSH, name=name, interval=KUMA_INTERVAL)
+                    log(f"[kuma] created monitor: {name}")
+
+        # Refresh monitors so we have pushToken for any newly created monitors
         monitors = api.get_monitors()
         auto = {}
         for mon in monitors:
@@ -210,8 +221,8 @@ def main() -> None:
             if mon.get("pushToken"):
                 auto[n] = mon
 
-        # Push status for each server
-        for name, s in desired.items():
+        # Push ONLY for running servers
+        for name, identifier in running_servers:
             mon = auto.get(name)
             if not mon:
                 continue
@@ -219,23 +230,13 @@ def main() -> None:
             if not token:
                 continue
 
-            identifier = s["identifier"]
             try:
-                resources = fetch_server_resources(identifier)
-                state = normalize_state(resources)
+                push(KUMA_URL, token, "up", "state=running")
+                log(f"[kuma] push up: {name}")
             except Exception as e:
-                # If panel is unreachable or auth fails, report down (but don't delete)
-                push(KUMA_URL, token, "down", f"error fetching resources: {type(e).__name__}")
-                continue
+                log(f"[kuma] push ERROR {name}: {type(e).__name__}: {e}")
 
-            # Define UP/DOWN mapping
-            if state in ("running", "starting"):
-                push(KUMA_URL, token, "up", f"state={state}")
-            else:
-                # stopping/offline/unknown => down
-                push(KUMA_URL, token, "down", f"state={state or 'unknown'}")
-
-        # Cleanup: delete stale AUTO monitors with no heartbeat for > KUMA_STALE_DAYS
+        # Cleanup stale AUTO monitors with no heartbeat for > KUMA_STALE_DAYS
         for name, mon in list(auto.items()):
             hb = get_last_hb_ms(mon)
             if hb is None:
@@ -245,6 +246,7 @@ def main() -> None:
                 if mid:
                     try:
                         api.delete_monitor(mid)
+                        log(f"[kuma] deleted stale monitor: {name}")
                     except Exception:
                         pass
 
