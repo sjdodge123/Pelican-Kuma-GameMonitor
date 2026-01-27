@@ -1,7 +1,7 @@
 # Pelican-Kuma-GameMonitor
 
 A small container that uses Pelican/Pterodactyl Panel APIs + Uptime Kuma to automatically:
-- create Push monitors named: `AUTO <Pelican Server Name>`
+- create Push monitors named: `<Pelican Server Name>`
 - push UP/DOWN based on the panel's server state
 - delete stale AUTO monitors if they have had no heartbeat for > N days
 
