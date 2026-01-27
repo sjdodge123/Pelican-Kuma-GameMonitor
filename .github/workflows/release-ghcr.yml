@@ -28,5 +28,5 @@ jobs:
         with:
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/sjdodge123/pelican-kuma-gamemonitor:latest
+            ghcr.io/sjdodge123/pelican-kuma-gamemonitor:${{ github.ref_name }}
