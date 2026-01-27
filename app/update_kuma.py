@@ -92,10 +92,7 @@ def save_cache(path: Path, payload: dict) -> None:
 
 
 def fetch_pelican_servers() -> List[dict]:
-    """
-    Application API: GET /api/application/servers
-    We need: name, identifier, node/node_id
-    """
+    """Application API: GET /api/application/servers"""
     servers: List[dict] = []
     page = 1
     while True:
@@ -127,9 +124,13 @@ def fetch_pelican_nodes() -> Dict[int, str]:
     """
     Application API: GET /api/application/nodes
     Returns mapping: node_id -> node_name
+
+    If the Application API key lacks node permissions, Pelican can return 401/403.
+    In that case, return an empty mapping and proceed without wing tagging.
     """
     nodes: Dict[int, str] = {}
     page = 1
+
     while True:
         r = requests.get(
             f"{PEL_URL}/api/application/nodes?page={page}&per_page=100",
@@ -137,6 +138,14 @@ def fetch_pelican_nodes() -> Dict[int, str]:
             timeout=15,
             verify=PEL_SSL_VERIFY,
         )
+
+        if r.status_code in (401, 403):
+            log(
+                f"[pelican] WARNING: cannot read nodes (HTTP {r.status_code}). "
+                "Wing tagging will be disabled. Grant the Application API key node read permissions to enable it."
+            )
+            return {}
+
         r.raise_for_status()
         data = r.json()
 
@@ -158,9 +167,7 @@ def fetch_pelican_nodes() -> Dict[int, str]:
 
 
 def fetch_server_resources(identifier: str) -> dict:
-    """
-    Client API: GET /api/client/servers/{identifier}/resources
-    """
+    """Client API: GET /api/client/servers/{identifier}/resources"""
     r = requests.get(
         f"{PEL_URL}/api/client/servers/{identifier}/resources",
         headers=pel_client_headers(),
@@ -172,10 +179,7 @@ def fetch_server_resources(identifier: str) -> dict:
 
 
 def extract_state(resources_json: dict) -> str:
-    """
-    Your confirmed working payload:
-      {"object":"stats","attributes":{"current_state":"running", ...}}
-    """
+    """Extract current_state from multiple possible response shapes."""
     candidates = []
     candidates.append(resources_json.get("attributes", {}).get("current_state"))
     candidates.append(resources_json.get("attributes", {}).get("state"))
@@ -218,7 +222,10 @@ def wing_tag_name(node_name: str) -> str:
 
 
 def push(kuma_base: str, token: str, status: str, msg: str) -> None:
-    url = f"{kuma_base}/api/push/{token}?status={requests.utils.quote(status)}&msg={requests.utils.quote(msg)}"
+    url = (
+        f"{kuma_base}/api/push/{token}?status={requests.utils.quote(status)}"
+        f"&msg={requests.utils.quote(msg)}"
+    )
     requests.get(url, timeout=10, verify=KUMA_SSL_VERIFY).raise_for_status()
 
 
@@ -244,7 +251,6 @@ def ensure_tag_id(api: UptimeKumaApi, tags_by_name: Dict[str, dict], name: str) 
 
 
 def add_tag_to_monitor(api: UptimeKumaApi, monitor_id: int, tag_id: int) -> None:
-    # Add blindly; ignore "already exists" style errors
     try:
         api.add_monitor_tag(tag_id=tag_id, monitor_id=monitor_id, value="")
     except Exception:
@@ -252,10 +258,7 @@ def add_tag_to_monitor(api: UptimeKumaApi, monitor_id: int, tag_id: int) -> None
 
 
 def monitor_has_managed_tag(api: UptimeKumaApi, monitor_id: int, managed_tag_id: int) -> bool:
-    """
-    We use get_monitor() for tag verification because get_monitors() may not include tags
-    consistently across Kuma versions.
-    """
+    """Use get_monitor() because get_monitors() may omit tags depending on Kuma version."""
     try:
         mon = api.get_monitor(monitor_id)
     except Exception:
@@ -264,10 +267,8 @@ def monitor_has_managed_tag(api: UptimeKumaApi, monitor_id: int, managed_tag_id:
     tags = mon.get("tags") or []
     for t in tags:
         if isinstance(t, dict):
-            # Kuma sometimes returns tag relation objects; be flexible
             if int(t.get("tag_id") or t.get("id") or -1) == managed_tag_id:
                 return True
-            # Sometimes nested tag object exists
             tag_obj = t.get("tag")
             if isinstance(tag_obj, dict) and int(tag_obj.get("id") or -1) == managed_tag_id:
                 return True
@@ -283,7 +284,7 @@ def main() -> None:
     require_env("PEL_APP_KEY", PEL_APP_KEY)
     require_env("PEL_CLIENT_KEY", PEL_CLIENT_KEY)
 
-    # Cache servers + nodes
+    # Cache servers + nodes together
     cached = load_cache(CACHE_PATH, CACHE_TTL_SECONDS)
     if cached and isinstance(cached.get("servers"), list) and isinstance(cached.get("nodes"), dict):
         servers = cached["servers"]
@@ -298,24 +299,22 @@ def main() -> None:
     with UptimeKumaApi(KUMA_URL, ssl_verify=KUMA_SSL_VERIFY) as api:
         api.login(KUMA_USER, KUMA_PASS)
 
-        # tags
+        # Tags
         tags_list = api.get_tags()
-        tags_by_name: Dict[str, dict] = {t["name"]: t for t in tags_list if isinstance(t, dict) and "name" in t}
-
+        tags_by_name: Dict[str, dict] = {
+            t["name"]: t for t in tags_list if isinstance(t, dict) and "name" in t
+        }
         managed_tag_id = ensure_tag_id(api, tags_by_name, KUMA_MANAGED_TAG)
 
-        # existing push monitors by name
+        # Existing push monitors by name
         monitors = api.get_monitors()
-        by_name: Dict[str, dict] = {}
-        for mon in monitors:
-            if mon.get("pushToken"):
-                n = str(mon.get("name", ""))
-                by_name[n] = mon
+        by_name: Dict[str, dict] = {
+            str(m.get("name", "")): m for m in monitors if m.get("pushToken")
+        }
 
-        # Track monitors we consider "running now"
-        running_now: List[Tuple[str, str, str, Optional[str]]] = []  # (name, identifier, state, node_name)
+        running_now: List[Tuple[str, str, str, Optional[str]]] = []
 
-        # Only create / push for running or starting servers
+        # Only create/push for running/starting
         for s in servers:
             sname = str(s.get("name", "")).strip()
             identifier = str(s.get("identifier", "")).strip()
@@ -342,16 +341,15 @@ def main() -> None:
 
             running_now.append((name, identifier, state, node_name))
 
-            # Create monitor if missing
             if name not in by_name:
                 resp = api.add_monitor(type=MonitorType.PUSH, name=name, interval=KUMA_INTERVAL)
                 log(f"[kuma] created monitor: {name} resp={resp}")
 
-        # Refresh monitors after potential creates
+        # Refresh monitors
         monitors = api.get_monitors()
         by_name = {str(m.get("name", "")): m for m in monitors if m.get("pushToken")}
 
-        # Ensure tags on running monitors + push state
+        # Tag and push for running servers
         for name, identifier, state, node_name in running_now:
             mon = by_name.get(name)
             if not mon:
@@ -362,10 +360,10 @@ def main() -> None:
             if not monitor_id or not token:
                 continue
 
-            # Always tag as managed
+            # Managed tag
             add_tag_to_monitor(api, int(monitor_id), managed_tag_id)
 
-            # Tag by wing/node name
+            # Wing tag if we have node mapping
             if node_name:
                 wing_name = wing_tag_name(node_name)
                 wing_tag_id = ensure_tag_id(api, tags_by_name, wing_name)
@@ -375,7 +373,7 @@ def main() -> None:
             push(KUMA_URL, token, "up", f"state={state}")
             log(f"[kuma] push up: {name} msg=state={state}")
 
-        # Cleanup: delete stale monitors ONLY if they have managed tag
+        # Cleanup: delete stale monitors only if managed tag is present
         monitors = api.get_monitors()
         for mon in monitors:
             mid = mon.get("id")
@@ -385,7 +383,6 @@ def main() -> None:
             if hb is None or hb >= cutoff_ms:
                 continue
 
-            # Only delete if managed tag is present (tag-based cleanup)
             if monitor_has_managed_tag(api, int(mid), managed_tag_id):
                 try:
                     api.delete_monitor(int(mid))
