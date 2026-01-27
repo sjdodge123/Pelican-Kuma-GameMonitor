@@ -31,6 +31,10 @@ KUMA_MANAGED_TAG = os.environ.get("KUMA_MANAGED_TAG", "managed:pelican").strip()
 KUMA_WING_TAG_PREFIX = os.environ.get("KUMA_WING_TAG_PREFIX", "wing").strip().rstrip(":")
 KUMA_TAG_COLOR = os.environ.get("KUMA_TAG_COLOR", "#0ea5e9").strip()
 
+# Discord (optional)
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "").strip()
+DISCORD_STATE_PATH = Path(os.environ.get("DISCORD_STATE_PATH", "/data/discord_state.json"))
+
 # Cache
 CACHE_PATH = Path(os.environ.get("CACHE_PATH", "/data/pelican_servers_cache.json"))
 CACHE_TTL_SECONDS = int(os.environ.get("CACHE_TTL_SECONDS", "300"))
@@ -86,6 +90,25 @@ def save_cache(path: Path, payload: dict) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload["_cached_at"] = time.time()
+        path.write_text(json.dumps(payload))
+    except Exception:
+        pass
+
+
+def load_state(path: Path) -> Dict[str, dict]:
+    try:
+        if path.exists():
+            data = json.loads(path.read_text())
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        return {}
+    return {}
+
+
+def save_state(path: Path, payload: dict) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload))
     except Exception:
         pass
@@ -229,6 +252,13 @@ def push(kuma_base: str, token: str, status: str, msg: str) -> None:
     requests.get(url, timeout=10, verify=KUMA_SSL_VERIFY).raise_for_status()
 
 
+def send_discord(webhook_url: str, content: str) -> None:
+    if not webhook_url:
+        return
+    payload = {"content": content}
+    requests.post(webhook_url, json=payload, timeout=10).raise_for_status()
+
+
 def get_last_hb_ms(mon: dict) -> Optional[int]:
     for k in ("lastHeartbeat", "last_heartbeat", "lastBeat", "last_beat"):
         v = mon.get(k)
@@ -294,6 +324,12 @@ def main() -> None:
         nodes = fetch_pelican_nodes()
         save_cache(CACHE_PATH, {"servers": servers, "nodes": nodes})
 
+    state_cache: Dict[str, dict] = {}
+    if DISCORD_WEBHOOK_URL:
+        state_cache = load_state(DISCORD_STATE_PATH)
+    else:
+        log("[discord] disabled (DISCORD_WEBHOOK_URL not set)")
+
     cutoff_ms = int((time.time() - KUMA_STALE_DAYS * 86400) * 1000)
 
     with UptimeKumaApi(KUMA_URL, ssl_verify=KUMA_SSL_VERIFY) as api:
@@ -314,6 +350,7 @@ def main() -> None:
 
         running_now: List[Tuple[str, str, str, Optional[str]]] = []
         created_names: set[str] = set()
+        pending_notifications: List[str] = []
 
         # Only create/push for running/starting
         for s in servers:
@@ -332,7 +369,26 @@ def main() -> None:
                 log(f"[pelican] {sname} ({identifier}) resources ERROR {type(e).__name__}: {e}")
                 continue
 
-            if state not in RUNNING_STATES:
+            status = "up" if state in RUNNING_STATES else "down"
+            if DISCORD_WEBHOOK_URL:
+                prev_status = None
+                cached_entry = state_cache.get(identifier)
+                if isinstance(cached_entry, dict):
+                    prev_status = cached_entry.get("status")
+
+                # Only notify on state change after we've seen the server before
+                if prev_status and prev_status != status:
+                    pending_notifications.append(
+                        f"[{status.upper()}] {sname} is now {status.upper()}"
+                    )
+
+                state_cache[identifier] = {
+                    "status": status,
+                    "name": sname,
+                    "updated_at": int(time.time()),
+                }
+
+            if status != "up":
                 continue
 
             node_name = None
@@ -376,6 +432,17 @@ def main() -> None:
             # Push UP with state msg
             push(KUMA_URL, token, "up", f"state={state}")
             log(f"[kuma] push up: {name} msg=state={state}")
+
+        # Discord notifications (if configured)
+        if DISCORD_WEBHOOK_URL:
+            for msg in pending_notifications:
+                try:
+                    send_discord(DISCORD_WEBHOOK_URL, msg)
+                    log(f"[discord] sent: {msg}")
+                except Exception as e:
+                    log(f"[discord] ERROR {type(e).__name__}: {e}")
+
+            save_state(DISCORD_STATE_PATH, state_cache)
 
         # Cleanup: delete stale monitors only if managed tag is present
         monitors = api.get_monitors()

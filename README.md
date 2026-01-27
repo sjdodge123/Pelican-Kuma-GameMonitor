@@ -37,6 +37,20 @@ The container logs into Uptime Kuma and needs an account that can:
 - create tags and attach tags to monitors
 - delete monitors (for stale cleanup)
 
+### Discord (optional)
+
+This project can post **up/down state change** messages to a Discord channel using a webhook.
+
+Required Discord permissions:
+- You must have **Manage Webhooks** permission in the target channel (or server) to create the webhook.
+- The webhook itself needs permission to **Send Messages** in the channel.
+
+How to create/configure:
+1) In Discord, open the target server → channel settings → **Integrations** → **Webhooks** → **New Webhook**.
+2) Copy the **Webhook URL** and set it as `DISCORD_WEBHOOK_URL`.
+3) (Optional) Set a name and avatar for the webhook to identify these alerts.
+4) Restart the container so it picks up the new environment variable.
+
 ## Troubleshooting
 
 - **`401 Unauthenticated` from `/api/client/servers/<id>/resources`:** your `PEL_CLIENT_KEY` is invalid, expired, not copied correctly, or blocked by Allowed IPs.
@@ -75,6 +89,10 @@ Tagging (used for grouping + cleanup)
 - `KUMA_MANAGED_TAG=managed:pelican`
 - `KUMA_WING_TAG_PREFIX=wing`
 - `KUMA_TAG_COLOR=#0ea5e9`
+
+Discord notifications (optional)
+- `DISCORD_WEBHOOK_URL=` (if set, posts only on up/down state changes after the server has been seen at least once)
+- `DISCORD_STATE_PATH=/data/discord_state.json`
 
 Optional naming (OFF by default)
 - `KUMA_NAME_PREFIX=` (leave empty to use *only* the Pelican server name)
