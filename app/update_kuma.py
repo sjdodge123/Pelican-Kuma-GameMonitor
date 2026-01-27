@@ -313,6 +313,7 @@ def main() -> None:
         }
 
         running_now: List[Tuple[str, str, str, Optional[str]]] = []
+        created_names: set[str] = set()
 
         # Only create/push for running/starting
         for s in servers:
@@ -344,6 +345,7 @@ def main() -> None:
             if name not in by_name:
                 resp = api.add_monitor(type=MonitorType.PUSH, name=name, interval=KUMA_INTERVAL)
                 log(f"[kuma] created monitor: {name} resp={resp}")
+                created_names.add(name)
 
         # Refresh monitors
         monitors = api.get_monitors()
@@ -360,14 +362,16 @@ def main() -> None:
             if not monitor_id or not token:
                 continue
 
-            # Managed tag
-            add_tag_to_monitor(api, int(monitor_id), managed_tag_id)
+            # Only tag when the monitor is newly created
+            if name in created_names:
+                # Managed tag
+                add_tag_to_monitor(api, int(monitor_id), managed_tag_id)
 
-            # Wing tag if we have node mapping
-            if node_name:
-                wing_name = wing_tag_name(node_name)
-                wing_tag_id = ensure_tag_id(api, tags_by_name, wing_name)
-                add_tag_to_monitor(api, int(monitor_id), wing_tag_id)
+                # Wing tag if we have node mapping
+                if node_name:
+                    wing_name = wing_tag_name(node_name)
+                    wing_tag_id = ensure_tag_id(api, tags_by_name, wing_name)
+                    add_tag_to_monitor(api, int(monitor_id), wing_tag_id)
 
             # Push UP with state msg
             push(KUMA_URL, token, "up", f"state={state}")
