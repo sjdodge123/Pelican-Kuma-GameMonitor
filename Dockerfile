@@ -22,5 +22,8 @@ RUN chmod +x /entrypoint.sh
 
 VOLUME ["/data"]
 
+# Admin web UI port (override with ADMIN_PORT)
+EXPOSE 8080
+
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/entrypoint.sh"]
