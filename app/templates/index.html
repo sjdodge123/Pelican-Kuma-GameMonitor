@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ brand.name }} · Webhook Admin</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% if brand.logo_url %}<link rel="icon" href="{{ brand.logo_url }}">{% endif %}
+  <style>:root { --brand: {{ brand.color }}; }</style>
+</head>
+<body>
+  <header class="topbar">
+    {% if brand.logo_url %}
+      <img class="logo" src="{{ brand.logo_url }}" alt="{{ brand.name }} logo">
+    {% endif %}
+    <div>
+      <h1>{{ brand.name }}</h1>
+      <p class="subtitle">Game server Discord webhooks</p>
+    </div>
+    {% if kuma.status or kuma.dashboard %}
+    <nav class="topnav">
+      {% if kuma.status %}<a href="{{ kuma.status }}" target="_blank" rel="noopener noreferrer">Status page ↗</a>{% endif %}
+      {% if kuma.dashboard %}<a href="{{ kuma.dashboard }}" target="_blank" rel="noopener noreferrer">Uptime Kuma ↗</a>{% endif %}
+    </nav>
+    {% endif %}
+  </header>
+
+  <main>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="post" action="{{ url_for('save') }}">
+      <section class="card">
+        <h2>Default webhook</h2>
+        <p class="hint">Used for any server without its own webhook. Leave blank to disable.</p>
+        <input type="url" name="default_url" value="{{ default_url }}"
+               placeholder="https://discord.com/api/webhooks/...">
+      </section>
+
+      <section class="card">
+        <h2>Per-server webhooks</h2>
+        {% if rows %}
+        <table>
+          <thead><tr><th>Game server</th><th>Discord webhook URL</th><th></th></tr></thead>
+          <tbody>
+          {% for r in rows %}
+            <tr>
+              <td>
+                <span class="server-name">{{ r.name }}</span>
+                {% if not r.known %}<span class="badge">stale</span>{% endif %}
+                <input type="hidden" name="name__{{ r.identifier }}" value="{{ r.name }}">
+              </td>
+              <td>
+                <input type="url" name="url__{{ r.identifier }}" value="{{ r.webhook_url }}"
+                       placeholder="(uses default)">
+              </td>
+              <td>
+                <button type="submit" formaction="{{ url_for('test') }}" name="identifier"
+                        value="{{ r.identifier }}" class="btn-secondary">Test</button>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="hint">No servers discovered yet. The monitor populates this list on its
+          next run (once per minute) — refresh shortly.</p>
+        {% endif %}
+      </section>
+
+      <div class="actions">
+        <button type="submit" class="btn-primary">Save changes</button>
+      </div>
+    </form>
+
+    <form method="post" action="{{ url_for('save_brand') }}">
+      <section class="card">
+        <h2>Branding</h2>
+        <p class="hint">Overrides the <code>BRAND_*</code> environment defaults. Leave a field blank to
+          fall back to the env/default shown as the placeholder. Logo &amp; avatar should be
+          <strong>public absolute URLs</strong> (Discord and the Kuma status page fetch them).</p>
+
+        <label class="field">
+          <span>Display name</span>
+          <input type="text" name="brand__name" value="{{ overrides.name or '' }}"
+                 placeholder="{{ brand.name }}">
+        </label>
+        <label class="field">
+          <span>Logo URL</span>
+          <input type="url" name="brand__logo_url" value="{{ overrides.logo_url or '' }}"
+                 placeholder="{{ brand.logo_url or 'https://.../logo.png' }}">
+        </label>
+        <label class="field">
+          <span>Webhook avatar URL</span>
+          <input type="url" name="brand__avatar_url" value="{{ overrides.avatar_url or '' }}"
+                 placeholder="{{ brand.avatar_url or 'defaults to logo' }}">
+        </label>
+        <label class="field">
+          <span>Webhook username</span>
+          <input type="text" name="brand__webhook_username" value="{{ overrides.webhook_username or '' }}"
+                 placeholder="{{ brand.webhook_username }}">
+        </label>
+        <label class="field">
+          <span>Accent / embed color (hex)</span>
+          <input type="text" name="brand__color" value="{{ overrides.color or '' }}"
+                 placeholder="{{ brand.color }}">
+        </label>
+        <label class="field">
+          <span>Brand URL (optional)</span>
+          <input type="url" name="brand__url" value="{{ overrides.url or '' }}"
+                 placeholder="{{ brand.url or 'https://...' }}">
+        </label>
+      </section>
+
+      <div class="actions">
+        <button type="submit" class="btn-primary">Save branding</button>
+      </div>
+    </form>
+  </main>
+</body>
+</html>
