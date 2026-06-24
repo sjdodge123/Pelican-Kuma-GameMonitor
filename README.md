@@ -139,6 +139,7 @@ Tagging (used for grouping + cleanup)
 Discord notifications (optional)
 - `DISCORD_WEBHOOK_URL=` (global fallback webhook; per-server webhooks are set in the admin UI and stored in `/data/webhooks.json`)
 - `DISCORD_STATE_PATH=/data/discord_state.json`
+- `DISCORD_CONFIRM_RUNS=2` (a status change must persist this many consecutive runs (~minutes) before notifying; debounces transient up/down flaps. `1` = notify on every change)
 
 Admin UI
 - `ADMIN_PORT=8080`

@@ -40,6 +40,11 @@ KUMA_TAG_COLOR = os.environ.get("KUMA_TAG_COLOR", "#0ea5e9").strip()
 # Discord (optional). Per-server webhooks are managed via the admin UI and
 # stored in /data/webhooks.json; DISCORD_WEBHOOK_URL remains the global fallback.
 DISCORD_STATE_PATH = Path(os.environ.get("DISCORD_STATE_PATH", "/data/discord_state.json"))
+# Flap suppression: a status change must persist for this many consecutive runs
+# (~minutes, since supercronic runs once/minute) before a Discord notification
+# fires. This debounces transient blips — a one-run down/up flap reads as noise,
+# not an outage. Set to 1 to notify on every single change (old behavior).
+DISCORD_CONFIRM_RUNS = max(1, int(os.environ.get("DISCORD_CONFIRM_RUNS", "2")))
 
 # Status page (dynamic, single page grouped by wing/node)
 STATUS_PAGE_ENABLED = os.environ.get("STATUS_PAGE_ENABLED", "1") == "1"
@@ -685,16 +690,34 @@ def main() -> None:
                 continue
 
             status = "up" if state in RUNNING_STATES else "down"
-            prev_entry = state_cache.get(identifier)
-            prev_status = prev_entry.get("status") if isinstance(prev_entry, dict) else None
+            prev_entry = state_cache.get(identifier) if isinstance(state_cache.get(identifier), dict) else {}
+            # "status" is the last *confirmed* status (the notification baseline);
+            # "pending"/"pending_count" track a not-yet-confirmed change so a brief
+            # flap is discarded instead of notified.
+            confirmed = prev_entry.get("status")
+            pending = prev_entry.get("pending")
+            pending_count = prev_entry.get("pending_count", 0)
 
-            # Only notify on a change after we've seen the server before, and only
-            # when notifications are enabled — but always update the baseline below.
-            if discord_enabled and prev_status and prev_status != status:
-                pending_notifications.append((identifier, sname, status))
+            if confirmed is None:
+                # First time we've seen this server: set baseline, never notify.
+                new_confirmed, new_pending, new_count = status, None, 0
+            elif status == confirmed:
+                # Back to (or still at) the confirmed state — cancel any flap.
+                new_confirmed, new_pending, new_count = confirmed, None, 0
+            else:
+                # Differs from confirmed: count consecutive runs of this new status.
+                new_count = pending_count + 1 if status == pending else 1
+                if new_count >= DISCORD_CONFIRM_RUNS:
+                    new_confirmed, new_pending, new_count = status, None, 0
+                    if discord_enabled:
+                        pending_notifications.append((identifier, sname, status))
+                else:
+                    new_confirmed, new_pending = confirmed, status
 
             state_cache[identifier] = {
-                "status": status,
+                "status": new_confirmed,
+                "pending": new_pending,
+                "pending_count": new_count,
                 "name": sname,
                 "updated_at": int(time.time()),
             }
