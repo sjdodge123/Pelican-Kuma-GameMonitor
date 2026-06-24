@@ -57,16 +57,32 @@ ADMIN_PASS = os.environ.get("ADMIN_PASS", "").strip()
 
 # Used only to build outbound links to Kuma (no API access — keeps decoupling).
 KUMA_URL = os.environ.get("KUMA_URL", "").strip().rstrip("/")
+# Public-facing base for the header links. KUMA_PUBLIC_URL is the explicit override;
+# otherwise derive it from ADMIN_PUBLIC_URL (same host as Kuma, minus the admin
+# sub-path); finally fall back to the internal KUMA_URL.
+KUMA_PUBLIC_URL = os.environ.get("KUMA_PUBLIC_URL", "").strip().rstrip("/")
+ADMIN_PUBLIC_URL = os.environ.get("ADMIN_PUBLIC_URL", "").strip().rstrip("/")
 STATUS_PAGE_SLUG = os.environ.get("STATUS_PAGE_SLUG", "gamersaloon").strip()
 STATUS_PAGE_ENABLED = os.environ.get("STATUS_PAGE_ENABLED", "1") == "1"
 
 
+def _public_base() -> str:
+    if KUMA_PUBLIC_URL:
+        return KUMA_PUBLIC_URL
+    # ADMIN_PUBLIC_URL (e.g. https://status.example.net/admin) minus the mount
+    # prefix gives the public Kuma base (https://status.example.net).
+    if ADMIN_PUBLIC_URL and ADMIN_URL_PREFIX and ADMIN_PUBLIC_URL.endswith(ADMIN_URL_PREFIX):
+        return ADMIN_PUBLIC_URL[: -len(ADMIN_URL_PREFIX)].rstrip("/")
+    return KUMA_URL
+
+
 def _kuma_links() -> dict:
-    if not KUMA_URL:
+    base = _public_base()
+    if not base:
         return {}
-    links = {"dashboard": KUMA_URL}
+    links = {"dashboard": base}
     if STATUS_PAGE_ENABLED and STATUS_PAGE_SLUG:
-        links["status"] = f"{KUMA_URL}/status/{STATUS_PAGE_SLUG}"
+        links["status"] = f"{base}/status/{STATUS_PAGE_SLUG}"
     return links
 # Auth turns on as soon as a password is set (username defaults to "admin").
 # Setting only one of the two no longer silently leaves the panel wide open.
