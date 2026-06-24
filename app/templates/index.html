@@ -24,7 +24,7 @@
     </div>
     {% if kuma.status or kuma.dashboard %}
     <nav class="topnav">
-      {% if kuma.status %}<a href="{{ kuma.status }}" target="_blank" rel="noopener noreferrer">Status page ↗</a>{% endif %}
+      {% if kuma.status %}<a href="{{ kuma.status }}">Status page</a>{% endif %}
       {% if kuma.dashboard %}<a href="{{ kuma.dashboard }}" target="_blank" rel="noopener noreferrer">Uptime Kuma ↗</a>{% endif %}
     </nav>
     {% endif %}

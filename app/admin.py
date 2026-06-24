@@ -84,7 +84,9 @@ def _kuma_links() -> dict:
     # "Domain Names" feature), so the base URL alone wouldn't reach the dashboard.
     links = {"dashboard": f"{base}/dashboard"}
     if STATUS_PAGE_ENABLED and STATUS_PAGE_SLUG:
-        links["status"] = f"{base}/status/{STATUS_PAGE_SLUG}"
+        # The domain root serves the status page (Kuma "Domain Names"), so link the
+        # clean root rather than the /status/<slug> path.
+        links["status"] = f"{base}/"
     return links
 # Auth turns on as soon as a password is set (username defaults to "admin").
 # Setting only one of the two no longer silently leaves the panel wide open.
