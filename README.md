@@ -140,6 +140,8 @@ Discord notifications (optional)
 - `DISCORD_WEBHOOK_URL=` (global fallback webhook; per-server webhooks are set in the admin UI and stored in `/data/webhooks.json`)
 - `DISCORD_STATE_PATH=/data/discord_state.json`
 - `DISCORD_CONFIRM_RUNS=2` (a status change must persist this many consecutive runs (~minutes) before notifying; debounces transient up/down flaps. `1` = notify on every change)
+- `DISCORD_USE_BRAND_IDENTITY=0` (by default each webhook's own Discord-configured name + avatar identify the message; set `1` to override with the brand username/avatar)
+- `STATUS_PAGE_PUBLIC_URL=` (public status page URL, e.g. `status.gamernight.net`; when set, a "View live status" link is appended to notifications)
 
 Admin UI
 - `ADMIN_PORT=8080`
