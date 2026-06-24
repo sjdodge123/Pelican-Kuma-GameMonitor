@@ -67,6 +67,12 @@ STATUS_PAGE_BRAND_CSS = os.environ.get("STATUS_PAGE_BRAND_CSS", "1") == "1"
 # footer text (markdown allowed).
 ADMIN_PUBLIC_URL = os.environ.get("ADMIN_PUBLIC_URL", "").strip()
 STATUS_PAGE_FOOTER = os.environ.get("STATUS_PAGE_FOOTER", "").strip()
+# Public URL of the live status page (e.g. status.gamernight.net). When set, a
+# "View live status" link is appended to Discord notifications. A bare host is
+# upgraded to https://.
+STATUS_PAGE_PUBLIC_URL = os.environ.get("STATUS_PAGE_PUBLIC_URL", "").strip()
+if STATUS_PAGE_PUBLIC_URL and not STATUS_PAGE_PUBLIC_URL.startswith(("http://", "https://")):
+    STATUS_PAGE_PUBLIC_URL = "https://" + STATUS_PAGE_PUBLIC_URL
 
 # Maintenance sync (opt-in): mirror Pelican power schedules into Kuma maintenance
 # windows so scheduled-offline shows as "maintenance" instead of degraded.
@@ -775,6 +781,8 @@ def main() -> None:
             color = COLOR_UP if status == "up" else COLOR_DOWN
             title = f"{sname} is {status.upper()}"
             desc = f"Server **{sname}** changed state to **{status.upper()}**."
+            if STATUS_PAGE_PUBLIC_URL:
+                desc += f"\n\n[View live status]({STATUS_PAGE_PUBLIC_URL})"
             try:
                 send_discord(url, title, desc, color)
                 log(f"[discord] sent ({identifier}): {title}")
