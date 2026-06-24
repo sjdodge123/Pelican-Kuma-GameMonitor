@@ -116,6 +116,11 @@ Discord and the Kuma status page can fetch them — see `app/static/brand/README
 - `PEL_CLIENT_KEY=<INSERT CLIENT KEY HERE>` (Client key from Profile → API Keys, used for /api/client/*)
 
 ### Optional (defaults shown)
+
+> Vars marked **†** are also editable live in the admin UI (the **Settings** card,
+> stored in `/data/settings.json`); the admin override wins over the env var. Everything
+> else here is env-only.
+
 General
 - `DEBUG=0` (set `1` to print state + tag actions in logs)
 - `KUMA_SSL_VERIFY=1`
@@ -139,9 +144,9 @@ Tagging (used for grouping + cleanup)
 Discord notifications (optional)
 - `DISCORD_WEBHOOK_URL=` (global fallback webhook; per-server webhooks are set in the admin UI and stored in `/data/webhooks.json`)
 - `DISCORD_STATE_PATH=/data/discord_state.json`
-- `DISCORD_CONFIRM_RUNS=2` (a status change must persist this many consecutive runs (~minutes) before notifying; debounces transient up/down flaps. `1` = notify on every change)
-- `DISCORD_USE_BRAND_IDENTITY=0` (by default each webhook's own Discord-configured name + avatar identify the message; set `1` to override with the brand username/avatar)
-- `STATUS_PAGE_PUBLIC_URL=` (public status page URL, e.g. `status.gamernight.net`; when set, a "View live status" link is appended to notifications)
+- `DISCORD_CONFIRM_RUNS=2` † (a status change must persist this many consecutive runs (~minutes) before notifying; debounces transient up/down flaps. `1` = notify on every change)
+- `DISCORD_USE_BRAND_IDENTITY=0` † (by default each webhook's own Discord-configured name + avatar identify the message; set `1` to override with the brand username/avatar)
+- `STATUS_PAGE_PUBLIC_URL=` † (public status page URL, e.g. `status.gamernight.net`; when set, a "View live status" link is appended to notifications)
 
 Admin UI
 - `ADMIN_PORT=8080`
@@ -150,17 +155,17 @@ Admin UI
 - `ADMIN_SECRET_KEY=` (Flask session/flash secret)
 
 Status page
-- `STATUS_PAGE_ENABLED=1`
+- `STATUS_PAGE_ENABLED=1` †
 - `STATUS_PAGE_SLUG=gamersaloon`
-- `STATUS_PAGE_TITLE=` (defaults to `<BRAND_NAME> Game Servers`)
-- `STATUS_PAGE_THEME=dark` (`light` or `dark`)
-- `STATUS_PAGE_UNGROUPED_LABEL=Other` (group name for monitors with no wing tag)
+- `STATUS_PAGE_TITLE=` † (defaults to `<BRAND_NAME> Game Servers`)
+- `STATUS_PAGE_THEME=dark` † (`light` or `dark`)
+- `STATUS_PAGE_UNGROUPED_LABEL=Other` † (group name for monitors with no wing tag)
 - `STATUS_PAGE_ICON=/static/brand/icon.png` (local path → embedded data URI, or an absolute URL)
 - `STATUS_PAGE_CUSTOM_CSS=` (override the branded theme) / `STATUS_PAGE_BRAND_CSS=1` (set `0` to manage CSS yourself)
 
 Maintenance sync (scheduled-off → maintenance, not degraded)
-- `MAINTENANCE_SYNC_ENABLED=0` (opt-in; set `1` to enable)
-- `SCHEDULE_TZ=UTC` (timezone Pelican evaluates schedule crons in; windows created in this tz)
+- `MAINTENANCE_SYNC_ENABLED=0` † (opt-in; set `1` to enable)
+- `SCHEDULE_TZ=UTC` † (timezone Pelican evaluates schedule crons in; windows created in this tz)
 - `SCHEDULE_CACHE_TTL_SECONDS=3600`
 - `MAINTENANCE_STATE_PATH=/data/maintenance_state.json`
 - `SCHEDULE_CACHE_PATH=/data/pelican_schedules_cache.json`

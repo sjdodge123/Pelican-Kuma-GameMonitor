@@ -1,27 +1,21 @@
 """Shared Discord notification helper (used by the monitor and the admin UI)."""
-import os
-
 import requests
 
 from branding import branding
-
-# By default each Discord webhook's own configured name + avatar identify the
-# message (set in Discord's Integrations > Webhooks UI), so per-channel webhooks
-# can carry their own game's name/icon. Set DISCORD_USE_BRAND_IDENTITY=1 to
-# instead override every message with the brand username/avatar.
-USE_BRAND_IDENTITY = os.environ.get("DISCORD_USE_BRAND_IDENTITY", "0") == "1"
+from settings import settings
 
 
 def send_discord(webhook_url: str, title: str, description: str, color: int) -> None:
     """Post a branded embed to a Discord webhook. The embed color comes from the
     brand; the message name/avatar default to the webhook's own Discord config
-    unless DISCORD_USE_BRAND_IDENTITY=1."""
+    unless the `discord_use_brand_identity` setting is on. Resolved per call so
+    the long-lived admin UI honors live setting changes."""
     if not webhook_url:
         return
     payload = {
         "embeds": [{"title": title, "description": description, "color": color}],
     }
-    if USE_BRAND_IDENTITY:
+    if settings()["discord_use_brand_identity"]:
         b = branding()
         payload["username"] = b["webhook_username"]
         # Discord fetches avatar_url from its own servers, so only send one it

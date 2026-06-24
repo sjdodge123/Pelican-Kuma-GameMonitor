@@ -11,7 +11,12 @@ from uptime_kuma_api import UptimeKumaApi, MonitorType
 from branding import branding, COLOR_UP, COLOR_DOWN
 from store import load_webhooks, webhook_for, read_json, write_json
 from notify import send_discord
+from settings import settings
 import maintenance as maint
+
+# Effective optional settings (admin override → env → default). Resolved once at
+# import; the monitor is a fresh process each minute, so this is current per run.
+_S = settings()
 
 # --------------------
 # Environment variables
@@ -44,14 +49,16 @@ DISCORD_STATE_PATH = Path(os.environ.get("DISCORD_STATE_PATH", "/data/discord_st
 # (~minutes, since supercronic runs once/minute) before a Discord notification
 # fires. This debounces transient blips — a one-run down/up flap reads as noise,
 # not an outage. Set to 1 to notify on every single change (old behavior).
-DISCORD_CONFIRM_RUNS = max(1, int(os.environ.get("DISCORD_CONFIRM_RUNS", "2")))
+# (Admin-editable; see settings.py.)
+DISCORD_CONFIRM_RUNS = _S["discord_confirm_runs"]
 
-# Status page (dynamic, single page grouped by wing/node)
-STATUS_PAGE_ENABLED = os.environ.get("STATUS_PAGE_ENABLED", "1") == "1"
+# Status page (dynamic, single page grouped by wing/node). enabled/title/theme/
+# ungrouped-label are admin-editable (settings.py); slug stays env-only.
+STATUS_PAGE_ENABLED = _S["status_page_enabled"]
 STATUS_PAGE_SLUG = os.environ.get("STATUS_PAGE_SLUG", "gamersaloon").strip()
-STATUS_PAGE_TITLE = os.environ.get("STATUS_PAGE_TITLE", "").strip()
-STATUS_PAGE_THEME = os.environ.get("STATUS_PAGE_THEME", "dark").strip()
-STATUS_PAGE_UNGROUPED = os.environ.get("STATUS_PAGE_UNGROUPED_LABEL", "Other").strip()
+STATUS_PAGE_TITLE = _S["status_page_title"]
+STATUS_PAGE_THEME = _S["status_page_theme"]
+STATUS_PAGE_UNGROUPED = _S["status_page_ungrouped_label"]
 STATUS_PAGE_STATE_PATH = Path(os.environ.get("STATUS_PAGE_STATE_PATH", "/data/statuspage_state.json"))
 # Icon shown on the Kuma status page. A local /static/... path is embedded as a
 # base64 data URI (Kuma's native icon format) so branding renders with no public
@@ -69,17 +76,18 @@ ADMIN_PUBLIC_URL = os.environ.get("ADMIN_PUBLIC_URL", "").strip()
 STATUS_PAGE_FOOTER = os.environ.get("STATUS_PAGE_FOOTER", "").strip()
 # Public URL of the live status page (e.g. status.gamernight.net). When set, a
 # "View live status" link is appended to Discord notifications. A bare host is
-# upgraded to https://.
-STATUS_PAGE_PUBLIC_URL = os.environ.get("STATUS_PAGE_PUBLIC_URL", "").strip()
+# upgraded to https://. (Admin-editable; see settings.py.)
+STATUS_PAGE_PUBLIC_URL = _S["status_page_public_url"]
 if STATUS_PAGE_PUBLIC_URL and not STATUS_PAGE_PUBLIC_URL.startswith(("http://", "https://")):
     STATUS_PAGE_PUBLIC_URL = "https://" + STATUS_PAGE_PUBLIC_URL
 
 # Maintenance sync (opt-in): mirror Pelican power schedules into Kuma maintenance
 # windows so scheduled-offline shows as "maintenance" instead of degraded.
-MAINTENANCE_SYNC_ENABLED = os.environ.get("MAINTENANCE_SYNC_ENABLED", "0") == "1"
+# (enabled + timezone are admin-editable; see settings.py.)
+MAINTENANCE_SYNC_ENABLED = _S["maintenance_sync_enabled"]
 # Timezone Pelican evaluates schedule crons in (panel TZ; UTC by default). Used
 # both to interpret the crons and as the Kuma maintenance timezone.
-SCHEDULE_TZ = os.environ.get("SCHEDULE_TZ", "UTC").strip() or "UTC"
+SCHEDULE_TZ = _S["schedule_tz"] or "UTC"
 MAINTENANCE_STATE_PATH = Path(os.environ.get("MAINTENANCE_STATE_PATH", "/data/maintenance_state.json"))
 SCHEDULE_CACHE_PATH = Path(os.environ.get("SCHEDULE_CACHE_PATH", "/data/pelican_schedules_cache.json"))
 SCHEDULE_CACHE_TTL_SECONDS = int(os.environ.get("SCHEDULE_CACHE_TTL_SECONDS", "3600"))
