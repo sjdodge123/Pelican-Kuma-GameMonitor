@@ -124,6 +124,49 @@
         <button type="submit" class="btn-primary">Save branding</button>
       </div>
     </form>
+
+    <form method="post" action="{{ url_for('save_settings_route') }}">
+      <section class="card">
+        <h2>Settings</h2>
+        <p class="hint">Optional behavior, overriding the matching environment defaults. Leave a
+          field on <em>Default</em> (or blank) to inherit the env value, shown as the placeholder.
+          Changes apply on the monitor's next run (within a minute).</p>
+
+        {% for group, fields in settings_groups %}
+          <h3 class="group">{{ group }}</h3>
+          {% for f in fields %}
+            {% set raw = settings_raw.get(f.key, '') %}
+            <label class="field">
+              <span>{{ f.label }}{% if f.help %}<small class="help">{{ f.help }}</small>{% endif %}</span>
+              {% if f.type == 'bool' %}
+                <select name="set__{{ f.key }}">
+                  <option value="" {{ 'selected' if raw == '' }}>Default ({{ 'On' if settings_eff[f.key] else 'Off' }})</option>
+                  <option value="1" {{ 'selected' if raw == '1' }}>On</option>
+                  <option value="0" {{ 'selected' if raw == '0' }}>Off</option>
+                </select>
+              {% elif f.type == 'choice' %}
+                <select name="set__{{ f.key }}">
+                  <option value="" {{ 'selected' if raw == '' }}>Default ({{ settings_eff[f.key] }})</option>
+                  {% for c in f.choices %}
+                    <option value="{{ c }}" {{ 'selected' if raw == c }}>{{ c }}</option>
+                  {% endfor %}
+                </select>
+              {% elif f.type == 'int' %}
+                <input type="number" name="set__{{ f.key }}" value="{{ raw }}"
+                       placeholder="{{ settings_eff[f.key] }}"{% if f.min is defined %} min="{{ f.min }}"{% endif %}>
+              {% else %}
+                <input type="text" name="set__{{ f.key }}" value="{{ raw }}"
+                       placeholder="{{ settings_eff[f.key] or '(empty)' }}">
+              {% endif %}
+            </label>
+          {% endfor %}
+        {% endfor %}
+      </section>
+
+      <div class="actions">
+        <button type="submit" class="btn-primary">Save settings</button>
+      </div>
+    </form>
   </main>
 </body>
 </html>

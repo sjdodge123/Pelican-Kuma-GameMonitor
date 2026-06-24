@@ -62,7 +62,7 @@ main { max-width: 920px; margin: 0 auto; padding: 24px 20px 60px; }
 .card h2 { margin: 0 0 4px; font-size: 16px; }
 .hint { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
 
-input[type="url"], input[type="text"] {
+input[type="url"], input[type="text"], input[type="number"], select {
   width: 100%;
   padding: 9px 11px;
   background: #0b0e12;
@@ -71,7 +71,7 @@ input[type="url"], input[type="text"] {
   color: var(--text);
   font-size: 13px;
 }
-input:focus { outline: none; border-color: var(--brand); }
+input:focus, select:focus { outline: none; border-color: var(--brand); }
 
 .field { display: block; margin-bottom: 12px; }
 .field > span {
@@ -80,6 +80,17 @@ input:focus { outline: none; border-color: var(--brand); }
   color: var(--muted);
   margin-bottom: 4px;
 }
+.field .help { display: block; font-size: 11px; color: var(--muted); font-weight: 400; margin-top: 2px; opacity: 0.85; }
+h3.group {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--brand);
+  margin: 18px 0 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+h3.group:first-of-type { margin-top: 6px; }
 code {
   background: #0b0e12;
   padding: 1px 5px;

@@ -17,6 +17,9 @@ WEBHOOKS_PATH = Path(
 BRANDING_PATH = Path(
     os.environ.get("BRANDING_CONFIG_PATH", str(DATA_DIR / "branding.json"))
 )
+SETTINGS_PATH = Path(
+    os.environ.get("SETTINGS_CONFIG_PATH", str(DATA_DIR / "settings.json"))
+)
 # The monitor writes this cache; the admin UI reads it to list servers without
 # needing any Pelican API keys of its own.
 PEL_SERVERS_CACHE_PATH = Path(
@@ -115,6 +118,24 @@ def load_branding() -> Dict[str, str]:
 def save_branding(values: Dict[str, str]) -> None:
     clean = {k: str(values.get(k, "")).strip() for k in BRANDING_FIELDS}
     _write_json(BRANDING_PATH, clean)
+
+
+# --------------------
+# Optional runtime settings (admin-editable; env vars are the fallback defaults)
+# --------------------
+# Stored as raw strings ("", "1", "0", "dark", "2", ...); typing + resolution
+# (override → env → default) lives in settings.py. Mirrors the branding store.
+def load_settings() -> Dict[str, str]:
+    """Return the raw admin-set settings overrides (may be partial/empty)."""
+    data = _read_json(SETTINGS_PATH, {})
+    if not isinstance(data, dict):
+        return {}
+    return {k: ("" if v is None else str(v)).strip() for k, v in data.items()}
+
+
+def save_settings(values: Dict[str, str]) -> None:
+    clean = {k: ("" if v is None else str(v)).strip() for k, v in (values or {}).items()}
+    _write_json(SETTINGS_PATH, clean)
 
 
 # --------------------

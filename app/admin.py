@@ -22,12 +22,15 @@ from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 from branding import branding, COLOR_UP
 from notify import send_discord
+from settings import settings, SETTINGS_SCHEMA
 from store import (
     load_webhooks,
     save_webhooks,
     list_pelican_servers,
     load_branding,
     save_branding,
+    load_settings,
+    save_settings,
     webhook_for,
     BRANDING_FIELDS,
 )
@@ -63,7 +66,6 @@ KUMA_URL = os.environ.get("KUMA_URL", "").strip().rstrip("/")
 KUMA_PUBLIC_URL = os.environ.get("KUMA_PUBLIC_URL", "").strip().rstrip("/")
 ADMIN_PUBLIC_URL = os.environ.get("ADMIN_PUBLIC_URL", "").strip().rstrip("/")
 STATUS_PAGE_SLUG = os.environ.get("STATUS_PAGE_SLUG", "gamersaloon").strip()
-STATUS_PAGE_ENABLED = os.environ.get("STATUS_PAGE_ENABLED", "1") == "1"
 
 
 def _public_base() -> str:
@@ -83,7 +85,7 @@ def _kuma_links() -> dict:
     # /dashboard explicitly — the domain root may serve a status page (Kuma's
     # "Domain Names" feature), so the base URL alone wouldn't reach the dashboard.
     links = {"dashboard": f"{base}/dashboard"}
-    if STATUS_PAGE_ENABLED and STATUS_PAGE_SLUG:
+    if settings()["status_page_enabled"] and STATUS_PAGE_SLUG:
         # The domain root serves the status page (Kuma "Domain Names"), so link the
         # clean root rather than the /status/<slug> path.
         links["status"] = f"{base}/"
@@ -149,6 +151,17 @@ def _rows():
     return cfg.get("default", ""), rows
 
 
+def _settings_groups():
+    """Schema bucketed into ordered (group, [fields]) pairs for the form."""
+    groups, by_group = [], {}
+    for f in SETTINGS_SCHEMA:
+        if f["group"] not in by_group:
+            by_group[f["group"]] = []
+            groups.append(f["group"])
+        by_group[f["group"]].append(f)
+    return [(g, by_group[g]) for g in groups]
+
+
 @app.route("/healthz")
 def healthz():
     return {"status": "ok"}
@@ -165,6 +178,9 @@ def index():
         default_url=default_url,
         rows=rows,
         kuma=_kuma_links(),
+        settings_groups=_settings_groups(),
+        settings_raw=load_settings(),   # raw overrides (input values)
+        settings_eff=settings(),        # effective (placeholders + default labels)
     )
 
 
@@ -174,6 +190,17 @@ def save_brand():
     values = {f: request.form.get(f"brand__{f}", "").strip() for f in BRANDING_FIELDS}
     save_branding(values)
     flash("Branding saved.", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/settings", methods=["POST"])
+@require_auth
+def save_settings_route():
+    # Store the raw form value per field ("" = inherit env/default). Typing and
+    # resolution happen in settings.py; this only persists what was submitted.
+    values = {f["key"]: request.form.get(f"set__{f['key']}", "").strip() for f in SETTINGS_SCHEMA}
+    save_settings(values)
+    flash("Settings saved. They apply on the monitor's next run (within a minute).", "success")
     return redirect(url_for("index"))
 
 
