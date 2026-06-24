@@ -80,7 +80,9 @@ def _kuma_links() -> dict:
     base = _public_base()
     if not base:
         return {}
-    links = {"dashboard": base}
+    # /dashboard explicitly — the domain root may serve a status page (Kuma's
+    # "Domain Names" feature), so the base URL alone wouldn't reach the dashboard.
+    links = {"dashboard": f"{base}/dashboard"}
     if STATUS_PAGE_ENABLED and STATUS_PAGE_SLUG:
         links["status"] = f"{base}/status/{STATUS_PAGE_SLUG}"
     return links

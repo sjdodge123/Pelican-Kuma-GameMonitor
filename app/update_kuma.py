@@ -360,6 +360,11 @@ STATUS_PALETTE = {
 # Cap on an embedded (data-URI) icon's raw size; Kuma stores the icon inline and
 # serves it to every status-page viewer, so a huge image would bloat the page.
 MAX_ICON_BYTES = 512 * 1024
+# Text shown in place of Kuma's "Under Maintenance" overall banner. Maintenance
+# windows here represent EXPECTED scheduled-off time (not an outage), so the banner
+# is relabeled. Only the maintenance state is touched — a real outage still reads
+# "Partially Degraded". Set empty to keep Kuma's default "Under Maintenance" banner.
+STATUS_PAGE_OK_LABEL = os.environ.get("STATUS_PAGE_OK_LABEL", "All Systems Operational").strip()
 
 
 def build_status_css(brand: dict) -> str:
@@ -382,9 +387,19 @@ a, a:hover { color: __ACCENT__ !important; }
 .status-page-wrapper .title-flex, header, .top { border-bottom: 2px solid __ACCENT__ !important; }
 img.logo, .logo { border-radius: 8px; }
 """
+    # Relabel the "Under Maintenance" overall banner (scheduled-off is expected, not
+    # an outage). `:has(svg.status-maintenance)` scopes this to ONLY the maintenance
+    # state, so a real outage still shows "Partially Degraded".
+    if STATUS_PAGE_OK_LABEL:
+        css += """
+.overall-status:has(svg.status-maintenance) > div:first-child > svg { display: none !important; }
+.overall-status:has(svg.status-maintenance) > div:first-child { font-size: 0 !important; }
+.overall-status:has(svg.status-maintenance) > div:first-child::after { content: "__OKLABEL__"; font-size: 1.6rem !important; font-weight: 600; color: #2ecc71 !important; }
+"""
     repl = {"__ACCENT__": accent, "__BG__": p["bg"], "__CARD__": p["card"],
             "__LINE__": p["line"], "__TEXT__": p["text"], "__MUTED__": p["muted"],
-            "__NAME__": brand.get("name", "GameMonitor")}
+            "__NAME__": brand.get("name", "GameMonitor"),
+            "__OKLABEL__": STATUS_PAGE_OK_LABEL.replace('"', '\\"')}
     for k, v in repl.items():
         css = css.replace(k, v)
     return css.strip()
