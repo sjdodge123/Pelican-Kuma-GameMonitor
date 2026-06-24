@@ -57,6 +57,11 @@ STATUS_PAGE_ICON = os.environ.get("STATUS_PAGE_ICON", "/static/brand/icon.png").
 # your own CSS to override, or set STATUS_PAGE_BRAND_CSS=0 to manage CSS yourself.
 STATUS_PAGE_CUSTOM_CSS = os.environ.get("STATUS_PAGE_CUSTOM_CSS", "")
 STATUS_PAGE_BRAND_CSS = os.environ.get("STATUS_PAGE_BRAND_CSS", "1") == "1"
+# Public URL of the admin UI (behind your reverse proxy). When set, the status
+# page footer gets a markdown link to it. STATUS_PAGE_FOOTER overrides the whole
+# footer text (markdown allowed).
+ADMIN_PUBLIC_URL = os.environ.get("ADMIN_PUBLIC_URL", "").strip()
+STATUS_PAGE_FOOTER = os.environ.get("STATUS_PAGE_FOOTER", "").strip()
 
 # Maintenance sync (opt-in): mirror Pelican power schedules into Kuma maintenance
 # windows so scheduled-offline shows as "maintenance" instead of degraded.
@@ -485,6 +490,15 @@ def reconcile_status_page(api: UptimeKumaApi, groups: Dict[str, List[int]], bran
     else:
         custom_css = None
 
+    # Footer: explicit override, else a markdown link to the admin UI when its
+    # public URL is configured, else unmanaged (preserve/operator default).
+    if STATUS_PAGE_FOOTER:
+        footer = STATUS_PAGE_FOOTER
+    elif ADMIN_PUBLIC_URL:
+        footer = f"{brand['name']} · [Manage webhooks]({ADMIN_PUBLIC_URL})"
+    else:
+        footer = None
+
     public_groups = [
         {"name": g, "monitorList": [{"id": mid} for mid in groups[g]]}
         for g in sorted(groups.keys(), key=lambda x: x.lower())
@@ -520,6 +534,9 @@ def reconcile_status_page(api: UptimeKumaApi, groups: Dict[str, List[int]], bran
     if custom_css is not None:
         desired["css"] = custom_css
         live["css"] = cfg.get("customCSS") or ""
+    if footer is not None:
+        desired["footer"] = footer
+        live["footer"] = cfg.get("footerText") or ""
     saved_state = load_state(STATUS_PAGE_STATE_PATH)
     if not newly and desired == live and icon_fp == saved_state.get("icon_fp", ""):
         return
@@ -528,6 +545,9 @@ def reconcile_status_page(api: UptimeKumaApi, groups: Dict[str, List[int]], bran
     # (default True only on first creation, never overriding a later operator change).
     kwargs: Dict[str, object] = {}
     for k in _STATUS_PRESERVE:
+        # footerText is managed (not preserved) when we have a footer to set.
+        if k == "footerText" and footer is not None:
+            continue
         if isinstance(cfg, dict) and k in cfg and cfg.get(k) not in (None,):
             kwargs[k] = cfg[k]
     kwargs["published"] = True if newly else cfg.get("published", True)
@@ -546,9 +566,11 @@ def reconcile_status_page(api: UptimeKumaApi, groups: Dict[str, List[int]], bran
         kwargs["icon"] = icon
     if custom_css is not None:
         kwargs["customCSS"] = custom_css
-    # Tie the footer to the brand only on first creation (don't resurrect a footer
-    # the operator deliberately cleared).
-    if newly:
+    if footer is not None:
+        kwargs["footerText"] = footer
+    elif newly:
+        # Tie the footer to the brand only on first creation (don't resurrect a
+        # footer the operator deliberately cleared).
         kwargs.setdefault("footerText", brand["name"])
 
     try:

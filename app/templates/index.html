@@ -4,14 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ brand.name }} · Webhook Admin</title>
+  {# Prefix root-relative brand assets with the app's mount path so they resolve
+     when served under a sub-path (e.g. /admin); leave absolute URLs untouched. #}
+  {% macro asset(u) -%}
+    {{ (request.script_root + u) if u and u.startswith('/') else u }}
+  {%- endmacro %}
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  {% if brand.logo_url %}<link rel="icon" href="{{ brand.logo_url }}">{% endif %}
+  {% if brand.logo_url %}<link rel="icon" href="{{ asset(brand.logo_url) }}">{% endif %}
   <style>:root { --brand: {{ brand.color }}; }</style>
 </head>
 <body>
   <header class="topbar">
     {% if brand.logo_url %}
-      <img class="logo" src="{{ brand.logo_url }}" alt="{{ brand.name }} logo">
+      <img class="logo" src="{{ asset(brand.logo_url) }}" alt="{{ brand.name }} logo">
     {% endif %}
     <div>
       <h1>{{ brand.name }}</h1>

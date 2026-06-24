@@ -17,6 +17,8 @@ from flask import (
     flash,
     Response,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.middleware.dispatcher import DispatcherMiddleware
 
 from branding import branding, COLOR_UP
 from notify import send_discord
@@ -31,6 +33,21 @@ from store import (
 )
 
 app = Flask(__name__)
+# Trust one layer of reverse proxy (NPM) for scheme/host/prefix, so redirects and
+# url_for honor the external https host instead of the internal http one.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
+# Serve the whole app under a sub-path (e.g. /admin) so it can live on the same
+# host as the status page (status.example.net/admin) instead of its own subdomain.
+# The proxy forwards the full /admin/... path unchanged; this mounts the app there
+# and sets SCRIPT_NAME, so url_for/redirects/static all include the prefix.
+ADMIN_URL_PREFIX = os.environ.get("ADMIN_URL_PREFIX", "").strip().rstrip("/")
+if ADMIN_URL_PREFIX:
+    def _prefix_not_found(environ, start_response):
+        start_response("404 Not Found", [("Content-Type", "text/plain")])
+        return [b"Not Found (admin UI is served under " + ADMIN_URL_PREFIX.encode() + b")"]
+    app.wsgi_app = DispatcherMiddleware(_prefix_not_found, {ADMIN_URL_PREFIX: app.wsgi_app})
+
 # Predictable default would let anyone forge flash/session cookies — require an
 # explicit secret in any real deployment, but keep a usable dev default.
 app.secret_key = os.environ.get("ADMIN_SECRET_KEY", "gamemonitor-admin-dev")
