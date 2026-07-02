@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly clean reboot of the Pelican host (Sunday 04:50 local time)
+
+[Timer]
+OnCalendar=Sun *-*-* 04:50:00
+# Deliberately NOT Persistent: a missed window must not trigger a surprise
+# reboot at the next boot.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

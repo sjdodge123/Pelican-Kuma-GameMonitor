@@ -1,0 +1,7 @@
+[Unit]
+Description=Cleanly stop all Pelican game servers and reboot the host
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/pelican-reboot.env
+ExecStart=/usr/local/bin/pelican_reboot.py shutdown

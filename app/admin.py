@@ -6,6 +6,7 @@ from /data/webhooks.json, which it lets you edit and test.
 """
 import os
 import hmac
+import time
 import functools
 
 from flask import (
@@ -31,6 +32,7 @@ from store import (
     save_branding,
     load_settings,
     save_settings,
+    save_notify_suppression,
     webhook_for,
     BRANDING_FIELDS,
 )
@@ -224,6 +226,24 @@ def save():
     save_webhooks(request.form.get("default_url", "").strip(), servers)
     flash("Webhook configuration saved.", "success")
     return redirect(url_for("index"))
+
+
+@app.route("/api/suppress", methods=["POST"])
+@require_auth
+def suppress():
+    """Set a maintenance block: the monitor skips Discord notifications until
+    now + `minutes` (state baselines still update, so nothing fires
+    retroactively afterwards). Used by the host's reboot script ahead of a
+    planned reboot. `minutes=0` clears an active block. Accepts form or JSON."""
+    raw = (request.get_json(silent=True) or {}).get("minutes") \
+        if request.is_json else request.form.get("minutes")
+    try:
+        minutes = min(int(raw), 24 * 60)
+    except (TypeError, ValueError):
+        return {"error": "minutes must be an integer"}, 400
+    until = time.time() + minutes * 60 if minutes > 0 else 0
+    save_notify_suppression(until)
+    return {"suppressed_until": int(until)}
 
 
 @app.route("/test", methods=["POST"])

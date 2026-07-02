@@ -9,7 +9,7 @@ import requests
 from uptime_kuma_api import UptimeKumaApi, MonitorType
 
 from branding import branding, COLOR_UP, COLOR_DOWN
-from store import load_webhooks, webhook_for, read_json, write_json
+from store import load_webhooks, webhook_for, read_json, write_json, notify_suppressed_until
 from notify import send_discord
 from settings import settings
 import maintenance as maint
@@ -648,6 +648,14 @@ def main() -> None:
     if not discord_enabled:
         log("[discord] disabled (no webhooks configured)")
 
+    # Maintenance block (set via the admin /api/suppress endpoint, e.g. by the
+    # host's reboot script): skip notifications, but keep updating baselines so
+    # nothing fires retroactively when the window ends.
+    suppress_until = notify_suppressed_until()
+    notify_blocked = time.time() < suppress_until
+    if notify_blocked:
+        log(f"[discord] maintenance block active until {int(suppress_until)} — notifications suppressed")
+
     cutoff_ms = int((time.time() - KUMA_STALE_DAYS * 86400) * 1000)
 
     with UptimeKumaApi(KUMA_URL, ssl_verify=KUMA_SSL_VERIFY) as api:
@@ -723,7 +731,9 @@ def main() -> None:
                 new_count = pending_count + 1 if status == pending else 1
                 if new_count >= DISCORD_CONFIRM_RUNS:
                     new_confirmed, new_pending, new_count = status, None, 0
-                    if discord_enabled:
+                    # notify_blocked = active maintenance block (planned outage):
+                    # the baseline still advances, the ping is just skipped.
+                    if discord_enabled and not notify_blocked:
                         pending_notifications.append((identifier, sname, status))
                 else:
                     new_confirmed, new_pending = confirmed, status

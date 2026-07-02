@@ -98,6 +98,33 @@ def webhook_for(identifier: str, cfg: Optional[dict] = None) -> str:
 
 
 # --------------------
+# Notification suppression (maintenance block)
+# --------------------
+# The monitor skips Discord notifications while now < until (state baselines
+# still update, so nothing fires retroactively when the window ends). Set via
+# the admin API (/api/suppress) — used by the host's reboot script so an
+# expected outage doesn't ping Discord.
+NOTIFY_SUPPRESS_PATH = Path(
+    os.environ.get("NOTIFY_SUPPRESS_PATH", str(DATA_DIR / "notify_suppress.json"))
+)
+
+
+def notify_suppressed_until() -> float:
+    """Epoch seconds until which Discord notifications are suppressed (0 = none)."""
+    data = _read_json(NOTIFY_SUPPRESS_PATH, {})
+    if isinstance(data, dict):
+        try:
+            return float(data.get("until", 0))
+        except (TypeError, ValueError):
+            pass
+    return 0.0
+
+
+def save_notify_suppression(until_ts: float) -> None:
+    _write_json(NOTIFY_SUPPRESS_PATH, {"until": float(until_ts)})
+
+
+# --------------------
 # Branding overrides (admin-editable; env vars are the fallback defaults)
 # --------------------
 BRANDING_FIELDS = ("name", "logo_url", "avatar_url", "webhook_username", "color", "url")

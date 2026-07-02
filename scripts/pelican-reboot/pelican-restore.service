@@ -1,0 +1,14 @@
+[Unit]
+Description=Start Pelican game servers that were running before the weekly reboot
+After=network-online.target docker.service
+Wants=network-online.target
+# Only runs when a shutdown recorded state — a normal boot does nothing.
+ConditionPathExists=/var/lib/pelican-reboot/state.json
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/pelican-reboot.env
+ExecStart=/usr/local/bin/pelican_reboot.py restore
+
+[Install]
+WantedBy=multi-user.target

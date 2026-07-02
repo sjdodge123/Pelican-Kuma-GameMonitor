@@ -1,0 +1,7 @@
+[Unit]
+Description=Reboot the Pelican host (with clean game-server shutdown) when RAM stays low
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/pelican-reboot.env
+ExecStart=/usr/local/bin/pelican_reboot.py ramwatch
