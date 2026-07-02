@@ -96,6 +96,8 @@ def _request(method: str, path: str, key: str, body=None):
         "Authorization": f"Bearer {key}",
         "Accept": "Application/vnd.pterodactyl.v1+json",
         "Content-Type": "application/json",
+        # Cloudflare 403s the default Python-urllib agent; identify ourselves.
+        "User-Agent": "pelican-reboot/1.0",
     })
     ctx = None if PEL_SSL_VERIFY else ssl._create_unverified_context()
     with urllib.request.urlopen(req, timeout=15, context=ctx) as resp:
