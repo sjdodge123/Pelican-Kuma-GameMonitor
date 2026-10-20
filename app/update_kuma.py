@@ -11,6 +11,7 @@ from uptime_kuma_api import UptimeKumaApi, MonitorType
 from branding import branding, COLOR_UP, COLOR_DOWN
 from store import load_webhooks, webhook_for, read_json, write_json, notify_suppressed_until
 from notify import send_discord
+from debounce import decide_notification, kuma_block_reasons, SUPPRESS, UNDER_MAINTENANCE
 from settings import settings
 import maintenance as maint
 
@@ -115,6 +116,11 @@ def require_env(name: str, val: str) -> None:
 def log(msg: str) -> None:
     if DEBUG:
         print(msg, flush=True)
+
+
+def info(msg: str) -> None:
+    """Always printed (not DEBUG-gated): rare, operator-relevant events."""
+    print(msg, flush=True)
 
 
 def pel_app_headers() -> Dict[str, str]:
@@ -304,12 +310,31 @@ def wing_tag_name(node_name: str) -> str:
     return f"{KUMA_WING_TAG_PREFIX}:{node_name}"
 
 
-def push(kuma_base: str, token: str, status: str, msg: str) -> None:
+def push(kuma_base: str, token: str, status: str, msg: str, name: str = "") -> bool:
+    """Send one push heartbeat. Never raises: one bad monitor must not abort the
+    run before the Discord loop and save_state. Returns True on success.
+
+    Kuma answers 404 on the push URL of a PAUSED monitor (the push token only
+    resolves for active monitors), so 404 is reported as "paused"."""
     url = (
         f"{kuma_base}/api/push/{token}?status={requests.utils.quote(status)}"
         f"&msg={requests.utils.quote(msg)}"
     )
-    requests.get(url, timeout=10, verify=KUMA_SSL_VERIFY).raise_for_status()
+    label = name or "monitor"
+    try:
+        r = requests.get(url, timeout=10, verify=KUMA_SSL_VERIFY)
+    except Exception as e:
+        info(f"[kuma] push ERROR: {label} {type(e).__name__}: {e}")
+        return False
+    if r.status_code == 404:
+        info(f"[kuma] push skipped: {label} is paused (404)")
+        return False
+    try:
+        r.raise_for_status()
+    except Exception as e:
+        info(f"[kuma] push ERROR: {label} {type(e).__name__}: {e}")
+        return False
+    return True
 
 
 def get_last_hb_ms(mon: dict) -> Optional[int]:
@@ -364,6 +389,49 @@ def get_monitor_tags(api: UptimeKumaApi, mon: dict) -> List[Tuple[int, str]]:
                 out.append((int(tid), tname))
             except (TypeError, ValueError):
                 continue
+    return out
+
+
+def active_maintenances_by_monitor(api: UptimeKumaApi, mons: List[Optional[dict]]) -> Dict[int, set]:
+    """{monitor_id: {maintenance ids under-maintenance right now}}.
+
+    Only queried when one of ``mons`` is flagged in maintenance (to tell a
+    tool-synced schedule window from a manual one) or lacks the ``maintenance``
+    flag (older Kuma: the map is then the only signal). Steady state with no
+    maintenance active costs zero extra calls. Failures degrade to {}."""
+    need = any(isinstance(m, dict) and (m.get("maintenance") is None or m.get("maintenance"))
+               for m in mons)
+    if not need:
+        return {}
+    out: Dict[int, set] = {}
+    try:
+        for mm in api.get_maintenances() or []:
+            if not isinstance(mm, dict) or str(mm.get("status", "")) != UNDER_MAINTENANCE:
+                continue
+            maint_id = mm.get("id")
+            if maint_id is None:
+                continue
+            try:
+                for m in api.get_monitor_maintenance(int(maint_id)) or []:
+                    if isinstance(m, dict) and m.get("id") is not None:
+                        out.setdefault(m["id"], set()).add(int(maint_id))
+            except Exception:
+                continue
+    except Exception as e:
+        log(f"[kuma] maintenance lookup failed {type(e).__name__}: {e}")
+    return out
+
+
+def owned_maintenance_ids() -> set:
+    """Ids of maintenances created by the schedule sync (app/maintenance.py)."""
+    out = set()
+    for v in load_state(MAINTENANCE_STATE_PATH).values():
+        if isinstance(v, dict):
+            for x in v.get("ids") or []:
+                try:
+                    out.add(int(x))
+                except (TypeError, ValueError):
+                    pass
     return out
 
 
@@ -691,6 +759,10 @@ def main() -> None:
 
         running_now: List[Tuple[str, str, str, Optional[str]]] = []
         created_names: set[str] = set()
+        # (identifier, server_name, monitor_name, observed_status). The Discord
+        # decision is deferred until after the monitor refresh below, so it can
+        # see whether each server's Kuma monitor is paused / in maintenance.
+        observed: List[Tuple[str, str, str, str]] = []
         # (identifier, server_name, new_status)
         pending_notifications: List[Tuple[str, str, str]] = []
 
@@ -712,39 +784,7 @@ def main() -> None:
                 continue
 
             status = "up" if state in RUNNING_STATES else "down"
-            prev_entry = state_cache.get(identifier) if isinstance(state_cache.get(identifier), dict) else {}
-            # "status" is the last *confirmed* status (the notification baseline);
-            # "pending"/"pending_count" track a not-yet-confirmed change so a brief
-            # flap is discarded instead of notified.
-            confirmed = prev_entry.get("status")
-            pending = prev_entry.get("pending")
-            pending_count = prev_entry.get("pending_count", 0)
-
-            if confirmed is None:
-                # First time we've seen this server: set baseline, never notify.
-                new_confirmed, new_pending, new_count = status, None, 0
-            elif status == confirmed:
-                # Back to (or still at) the confirmed state — cancel any flap.
-                new_confirmed, new_pending, new_count = confirmed, None, 0
-            else:
-                # Differs from confirmed: count consecutive runs of this new status.
-                new_count = pending_count + 1 if status == pending else 1
-                if new_count >= DISCORD_CONFIRM_RUNS:
-                    new_confirmed, new_pending, new_count = status, None, 0
-                    # notify_blocked = active maintenance block (planned outage):
-                    # the baseline still advances, the ping is just skipped.
-                    if discord_enabled and not notify_blocked:
-                        pending_notifications.append((identifier, sname, status))
-                else:
-                    new_confirmed, new_pending = confirmed, status
-
-            state_cache[identifier] = {
-                "status": new_confirmed,
-                "pending": new_pending,
-                "pending_count": new_count,
-                "name": sname,
-                "updated_at": int(time.time()),
-            }
+            observed.append((identifier, sname, name, status))
 
             if status != "up":
                 continue
@@ -757,13 +797,44 @@ def main() -> None:
             running_now.append((name, identifier, state, node_name))
 
             if name not in by_name:
-                resp = api.add_monitor(type=MonitorType.PUSH, name=name, interval=KUMA_INTERVAL)
-                log(f"[kuma] created monitor: {name} resp={resp}")
-                created_names.add(name)
+                try:
+                    resp = api.add_monitor(type=MonitorType.PUSH, name=name, interval=KUMA_INTERVAL)
+                    log(f"[kuma] created monitor: {name} resp={resp}")
+                    created_names.add(name)
+                except Exception as e:
+                    info(f"[kuma] create monitor ERROR: {name} {type(e).__name__}: {e}")
 
         # Refresh monitors
         monitors = api.get_monitors()
         by_name = {str(m.get("name", "")): m for m in monitors if m.get("pushToken")}
+
+        # Per-server Discord decision. A paused Kuma monitor or an active Kuma
+        # maintenance window mutes that server's posts (like the global
+        # /api/suppress block): the baseline still advances, nothing is posted.
+        active_maint = active_maintenances_by_monitor(api, [by_name.get(n) for _i, _s, n, _st in observed])
+        owned_maint = owned_maintenance_ids()
+        for identifier, sname, name, status in observed:
+            mon = by_name.get(name)
+            mid = mon.get("id") if isinstance(mon, dict) else None
+            reasons = kuma_block_reasons(mon, active_maint.get(mid, ()), owned_maint)
+            if notify_blocked:
+                reasons.append(SUPPRESS)
+            prev_entry = state_cache.get(identifier)
+            was_quiet = isinstance(prev_entry, dict) and bool(prev_entry.get("quiet"))
+            d = decide_notification(prev_entry, status, DISCORD_CONFIRM_RUNS, reasons)
+            if reasons:
+                log(f"[discord] {identifier} muted this run: {', '.join(reasons)}")
+            if d.notify:
+                if discord_enabled:
+                    pending_notifications.append((identifier, sname, status))
+            elif d.changed and discord_enabled:
+                why = ", ".join(reasons) if reasons else "settling after a quiet window" if was_quiet else "blocked"
+                info(f"[discord] withheld ({identifier}): {why} ({sname} is {status.upper()})")
+            state_cache[identifier] = {
+                **d.entry,
+                "name": sname,
+                "updated_at": int(time.time()),
+            }
 
         # Tag and push for running servers
         for name, identifier, state, node_name in running_now:
@@ -787,9 +858,9 @@ def main() -> None:
                     wing_tag_id = ensure_tag_id(api, tags_by_name, wing_name)
                     add_tag_to_monitor(api, int(monitor_id), wing_tag_id)
 
-            # Push UP with state msg
-            push(KUMA_URL, token, "up", f"state={state}")
-            log(f"[kuma] push up: {name} msg=state={state}")
+            # Push UP with state msg (never raises; 404 = paused monitor)
+            if push(KUMA_URL, token, "up", f"state={state}", name=name):
+                log(f"[kuma] push up: {name} msg=state={state}")
 
         # Discord notifications (per-server webhook, branded embed)
         for identifier, sname, status in pending_notifications:

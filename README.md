@@ -57,6 +57,22 @@ How to configure:
 2) Open the **admin UI** (see below), assign each game server its webhook URL, and **Save**. Use **Test** to verify.
 3) Assignments are stored in `/data/webhooks.json` and picked up on the next monitor run (no restart needed).
 
+#### Quiet bounces
+
+Three things mute a server's Discord posts during a deliberate restart or outage:
+
+- **Pausing its monitor in Uptime Kuma.** Pause, restart, verify, resume, and Discord stays silent.
+- **A Kuma maintenance window** that covers its monitor.
+- **`POST /api/suppress`** on the admin UI (`minutes=<n>`; `minutes=0` clears it), which mutes every server.
+
+While muted, the stored up/down baseline keeps advancing, so nothing fires when the window ends.
+A change that is still settling when a pause, manual maintenance window or `/api/suppress` block ends
+is confirmed quietly too, so the "back UP" after a resume stays silent. The next change after the
+server has settled notifies as usual. Windows created by the schedule sync below only mute while
+they are active, so a scheduled start is still announced. Withheld posts are logged as
+`[discord] withheld (<identifier>): <reason>`, and pushes to a paused monitor (Kuma answers 404)
+are logged as `[kuma] push skipped: <name> is paused (404)` instead of failing the run.
+
 ### Admin UI
 
 A small web interface (Flask, served on `ADMIN_PORT`, default `8080`) for managing the per-game
@@ -100,6 +116,7 @@ Discord and the Kuma status page can fetch them — see `app/static/brand/README
 ## Troubleshooting
 
 - **`401 Unauthenticated` from `/api/client/servers/<id>/resources`:** your `PEL_CLIENT_KEY` is invalid, expired, not copied correctly, or blocked by Allowed IPs.
+- **`[kuma] push skipped: <name> is paused (404)`:** that server's monitor is paused in Kuma. Heartbeats and its Discord posts are skipped until you resume it.
 - **`403 Forbidden` calling `/api/application/nodes`:** your `PEL_APP_KEY` is missing **Nodes: Read**. Wing tagging will be disabled until that permission is granted.
 
 ## Environment Variables
